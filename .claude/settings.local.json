@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -r \"TODO\\\\|FIXME\\\\|HACK\\\\|XXX\\\\|BUG\" /c/Users/bhask/OneDrive/Desktop/dsa-ai-coach --include=*.ts --include=*.tsx --include=*.js --include=*.jsx)",
+      "Bash(find /c/Users/bhask/OneDrive/Desktop/dsa-ai-coach/backend/src -name \"*.ts\" -exec wc -l {} +)",
+      "Bash(xargs wc:*)",
+      "Bash(grep -r \"console\\\\.\\\\|TODO\\\\|FIXME\\\\|HACK\\\\|XXX\\\\|BUG\" /c/Users/bhask/OneDrive/Desktop/dsa-ai-coach/backend/src --include=*.ts)",
+      "Bash(grep -E \"process\\\\.env\\\\.\" /c/Users/bhask/OneDrive/Desktop/dsa-ai-coach/backend/src/**/*.ts)",
+      "Bash(grep -oE \"process\\\\.env\\\\.[A-Z_]+\" /c/Users/bhask/OneDrive/Desktop/dsa-ai-coach/backend/src/**/*.ts)"
+    ]
+  }
+}

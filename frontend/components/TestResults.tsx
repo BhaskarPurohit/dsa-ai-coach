@@ -1,0 +1,87 @@
+// components/TestResults.tsx
+'use client';
+
+import React from 'react';
+import { CheckCircle, XCircle, Clock } from 'lucide-react';
+import { ExecutionResult } from '@/lib/types';
+
+interface TestResultsProps {
+  result: ExecutionResult | null;
+}
+
+export default function TestResults({ result }: TestResultsProps) {
+  if (!result) return null;
+
+  return (
+    <div className="card mt-4">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold">Test Results</h3>
+        <div className={`badge ${result.passed ? 'badge-easy' : 'badge-hard'}`}>
+          {result.passedTests}/{result.totalTests} Passed
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {result.results.map((test, index) => (
+          <div
+            key={index}
+            className={`p-4 rounded-lg border ${
+              test.passed
+                ? 'bg-success-50 border-success-200'
+                : 'bg-danger-50 border-danger-200'
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              {test.passed ? (
+                <CheckCircle className="w-5 h-5 text-success-600 mt-0.5" />
+              ) : (
+                <XCircle className="w-5 h-5 text-danger-600 mt-0.5" />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium mb-2">
+                  Test Case {index + 1}
+                </p>
+                <div className="space-y-1 text-sm">
+                  <div>
+                    <span className="font-medium">Input:</span>
+                    <pre className="mt-1 p-2 bg-white rounded text-xs overflow-x-auto">
+                      {JSON.stringify(test.input, null, 2)}
+                    </pre>
+                  </div>
+                  <div>
+                    <span className="font-medium">Expected:</span>
+                    <pre className="mt-1 p-2 bg-white rounded text-xs overflow-x-auto">
+                      {JSON.stringify(test.expectedOutput, null, 2)}
+                    </pre>
+                  </div>
+                  {!test.passed && (
+                    <div>
+                      <span className="font-medium">Your Output:</span>
+                      <pre className="mt-1 p-2 bg-white rounded text-xs overflow-x-auto">
+                        {JSON.stringify(test.actualOutput, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  {test.error && (
+                    <div>
+                      <span className="font-medium text-danger-600">Error:</span>
+                      <pre className="mt-1 p-2 bg-white rounded text-xs overflow-x-auto text-danger-600">
+                        {test.error}
+                      </pre>
+                    </div>
+                  )}
+                  {test.executionTime && (
+                    <div className="flex items-center gap-1 text-gray-600">
+                      <Clock className="w-4 h-4" />
+                      <span>{test.executionTime}s</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
