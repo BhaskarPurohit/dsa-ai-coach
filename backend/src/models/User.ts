@@ -5,6 +5,7 @@ export interface IUser extends Document {
   userId: string;
   email: string;
   name: string;
+  passwordHash?: string;
   profilePicture?: string;
   preferences: {
     language: 'javascript' | 'python';
@@ -19,6 +20,7 @@ const UserSchema: Schema = new Schema({
   userId: { type: String, required: true, unique: true },
   email: { type: String, required: true, unique: true },
   name: { type: String, required: true },
+  passwordHash: { type: String },
   profilePicture: { type: String },
   preferences: {
     language: { type: String, enum: ['javascript', 'python'], default: 'javascript' },

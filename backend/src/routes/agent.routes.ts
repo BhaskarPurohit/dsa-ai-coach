@@ -4,20 +4,18 @@ import { v4 as uuidv4 } from 'uuid';
 import { agentWorkflow } from '../agent/workflow';
 import { AgentStateType } from '../agent/state';
 import Progress from '../models/Progress';
+import { sessionService } from '../services/session.service';
+import { authMiddleware, AuthRequest } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
-// In-memory session storage (use Redis in production)
-const sessions = new Map<string, AgentStateType>();
+// All agent routes require authentication
+router.use(authMiddleware);
 
 // Start a new learning session
-router.post('/start-session', async (req, res) => {
+router.post('/start-session', async (req: AuthRequest, res) => {
   try {
-    const { userId } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required' });
-    }
+    const userId = req.userId!;
 
     // Get or create user progress
     let progress = await Progress.findOne({ userId });
@@ -30,7 +28,7 @@ router.post('/start-session', async (req, res) => {
         weakPatterns: [],
         totalHintsUsed: 0,
         streak: 0,
-        lastActive: new Date()
+        lastActive: new Date(),
       });
     }
 
@@ -48,21 +46,21 @@ router.post('/start-session', async (req, res) => {
       nextAction: 'SELECT_PATTERN',
       conversationHistory: [],
       userProgress: progress,
-      patternExplanationGiven: false
+      patternExplanationGiven: false,
     };
 
-    sessions.set(sessionId, initialState);
+    await sessionService.set(sessionId, userId, initialState);
 
     // Run initial workflow steps
     const result = await agentWorkflow.invoke(initialState);
-    sessions.set(sessionId, result);
+    await sessionService.set(sessionId, userId, result);
 
     res.json({
       sessionId,
       currentPattern: result.currentPattern,
       currentProblem: result.currentProblem,
       messages: result.conversationHistory,
-      nextAction: result.nextAction
+      nextAction: result.nextAction,
     });
   } catch (error) {
     console.error('Error starting session:', error);
@@ -71,34 +69,33 @@ router.post('/start-session', async (req, res) => {
 });
 
 // Submit code for evaluation
-router.post('/submit-code', async (req, res) => {
+router.post('/submit-code', async (req: AuthRequest, res) => {
   try {
     const { sessionId, code, language } = req.body;
+    const userId = req.userId!;
 
     if (!sessionId || !code) {
       return res.status(400).json({ error: 'sessionId and code are required' });
     }
 
-    const state = sessions.get(sessionId);
+    const state = await sessionService.get(sessionId);
     if (!state) {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    // Update state with user code
     state.userCode = code;
     state.language = language || 'javascript';
     state.nextAction = 'RUN_CODE';
 
-    // Run workflow
     const result = await agentWorkflow.invoke(state);
-    sessions.set(sessionId, result);
+    await sessionService.set(sessionId, userId, result);
 
     res.json({
       passed: result.executionResult?.passed,
       executionResult: result.executionResult,
-      messages: result.conversationHistory.slice(-2), // Last 2 messages
+      messages: result.conversationHistory.slice(-2),
       nextAction: result.nextAction,
-      attemptCount: result.attemptCount
+      attemptCount: result.attemptCount,
     });
   } catch (error) {
     console.error('Error submitting code:', error);
@@ -107,15 +104,16 @@ router.post('/submit-code', async (req, res) => {
 });
 
 // Request a hint
-router.post('/request-hint', async (req, res) => {
+router.post('/request-hint', async (req: AuthRequest, res) => {
   try {
     const { sessionId } = req.body;
+    const userId = req.userId!;
 
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId is required' });
     }
 
-    const state = sessions.get(sessionId);
+    const state = await sessionService.get(sessionId);
     if (!state) {
       return res.status(404).json({ error: 'Session not found' });
     }
@@ -123,12 +121,12 @@ router.post('/request-hint', async (req, res) => {
     state.nextAction = 'GENERATE_HINT';
 
     const result = await agentWorkflow.invoke(state);
-    sessions.set(sessionId, result);
+    await sessionService.set(sessionId, userId, result);
 
     res.json({
       hint: result.conversationHistory[result.conversationHistory.length - 1],
       hintLevel: result.hintLevel,
-      nextAction: result.nextAction
+      nextAction: result.nextAction,
     });
   } catch (error) {
     console.error('Error requesting hint:', error);
@@ -137,9 +135,9 @@ router.post('/request-hint', async (req, res) => {
 });
 
 // Get session state
-router.get('/session/:sessionId', (req, res) => {
+router.get('/session/:sessionId', async (req: AuthRequest, res) => {
   const { sessionId } = req.params;
-  const state = sessions.get(sessionId);
+  const state = await sessionService.get(sessionId);
 
   if (!state) {
     return res.status(404).json({ error: 'Session not found' });
@@ -151,20 +149,21 @@ router.get('/session/:sessionId', (req, res) => {
     attemptCount: state.attemptCount,
     hintLevel: state.hintLevel,
     messages: state.conversationHistory,
-    nextAction: state.nextAction
+    nextAction: state.nextAction,
   });
 });
 
 // Request next problem
-router.post('/next-problem', async (req, res) => {
+router.post('/next-problem', async (req: AuthRequest, res) => {
   try {
     const { sessionId } = req.body;
+    const userId = req.userId!;
 
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId is required' });
     }
 
-    const state = sessions.get(sessionId);
+    const state = await sessionService.get(sessionId);
     if (!state) {
       return res.status(404).json({ error: 'Session not found' });
     }
@@ -172,12 +171,12 @@ router.post('/next-problem', async (req, res) => {
     state.nextAction = 'SELECT_PROBLEM';
 
     const result = await agentWorkflow.invoke(state);
-    sessions.set(sessionId, result);
+    await sessionService.set(sessionId, userId, result);
 
     res.json({
       currentProblem: result.currentProblem,
       messages: result.conversationHistory.slice(-1),
-      nextAction: result.nextAction
+      nextAction: result.nextAction,
     });
   } catch (error) {
     console.error('Error getting next problem:', error);

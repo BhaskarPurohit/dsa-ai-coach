@@ -10,6 +10,74 @@ const api = axios.create({
   },
 });
 
+// Attach JWT token from localStorage on every request
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
+// Redirect to /auth on 401
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && typeof window !== 'undefined') {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/auth';
+    }
+    return Promise.reject(error);
+  }
+);
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+export interface AuthUser {
+  userId: string;
+  name: string;
+  email: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: AuthUser;
+}
+
+export const authAPI = {
+  register: async (name: string, email: string, password: string): Promise<AuthResponse> => {
+    const response = await api.post('/api/auth/register', { name, email, password });
+    return response.data;
+  },
+
+  login: async (email: string, password: string): Promise<AuthResponse> => {
+    const response = await api.post('/api/auth/login', { email, password });
+    return response.data;
+  },
+
+  logout: () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    window.location.href = '/auth';
+  },
+
+  getUser: (): AuthUser | null => {
+    if (typeof window === 'undefined') return null;
+    const raw = localStorage.getItem('user');
+    return raw ? JSON.parse(raw) : null;
+  },
+
+  isAuthenticated: (): boolean => {
+    if (typeof window === 'undefined') return false;
+    return !!localStorage.getItem('token');
+  },
+};
+
+// ── Agent ─────────────────────────────────────────────────────────────────────
+
 export interface StartSessionResponse {
   sessionId: string;
   currentPattern: string;
@@ -33,8 +101,8 @@ export interface HintResponse {
 }
 
 export const agentAPI = {
-  startSession: async (userId: string): Promise<StartSessionResponse> => {
-    const response = await api.post('/api/agent/start-session', { userId });
+  startSession: async (): Promise<StartSessionResponse> => {
+    const response = await api.post('/api/agent/start-session');
     return response.data;
   },
 
@@ -56,8 +124,10 @@ export const agentAPI = {
   nextProblem: async (sessionId: string) => {
     const response = await api.post('/api/agent/next-problem', { sessionId });
     return response.data;
-  }
+  },
 };
+
+// ── Problems ──────────────────────────────────────────────────────────────────
 
 export const problemAPI = {
   getAll: async (pattern?: string, difficulty?: string) => {
@@ -78,8 +148,10 @@ export const problemAPI = {
   getPatterns: async () => {
     const response = await api.get('/api/problems/meta/patterns');
     return response.data;
-  }
+  },
 };
+
+// ── Progress ──────────────────────────────────────────────────────────────────
 
 export const progressAPI = {
   get: async (userId: string) => {
@@ -100,7 +172,7 @@ export const progressAPI = {
   getPatternProgress: async (userId: string, pattern: string) => {
     const response = await api.get(`/api/progress/${userId}/patterns/${pattern}`);
     return response.data;
-  }
+  },
 };
 
 export default api;

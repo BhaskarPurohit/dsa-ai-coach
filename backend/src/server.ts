@@ -4,6 +4,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { connectDatabase } from './config/database';
 import agentRoutes from './routes/agent.routes';
+import authRoutes from './routes/auth.routes';
 import problemRoutes from './routes/problem.routes';
 import progressRoutes from './routes/progress.routes';
 
@@ -32,6 +33,7 @@ app.get('/health', (req, res) => {
 });
 
 // Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/agent', agentRoutes);
 app.use('/api/problems', problemRoutes);
 app.use('/api/progress', progressRoutes);

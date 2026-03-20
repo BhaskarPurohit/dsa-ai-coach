@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { agentAPI } from '@/lib/api';
+import { agentAPI, authAPI } from '@/lib/api';
 import CodeEditor from '@/components/CodeEditor';
 import HintPanel from '@/components/HintPanel';
 import TestResults from '@/components/TestResults';
@@ -11,7 +11,6 @@ import { Play, Lightbulb, SkipForward, Home } from 'lucide-react';
 
 export default function ProblemPage() {
   const router = useRouter();
-  const [userId, setUserId] = useState('');
   const [sessionId, setSessionId] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -28,19 +27,17 @@ export default function ProblemPage() {
   const [hintLevel, setHintLevel] = useState(0);
 
   useEffect(() => {
-    const id = localStorage.getItem('userId');
-    if (!id) {
-      router.push('/');
+    if (!authAPI.isAuthenticated()) {
+      router.push('/auth');
       return;
     }
-    setUserId(id);
-    initializeSession(id);
+    initializeSession();
   }, [router]);
 
-  const initializeSession = async (id: string) => {
+  const initializeSession = async () => {
     try {
       setLoading(true);
-      const response = await agentAPI.startSession(id);
+      const response = await agentAPI.startSession();
       
       setSessionId(response.sessionId);
       setCurrentPattern(response.currentPattern);

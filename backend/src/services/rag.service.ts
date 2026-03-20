@@ -2,6 +2,7 @@
 import weaviate, { WeaviateClient, ApiKey } from 'weaviate-ts-client';
 
 interface PatternKnowledge {
+  [key: string]: unknown;
   pattern: string;
   description: string;
   intuition: string;
@@ -17,9 +18,11 @@ export class RAGService {
   private client: WeaviateClient;
 
   constructor() {
+    const rawUrl = process.env.WEAVIATE_URL || 'http://localhost:8080';
+    const parsed = new URL(rawUrl);
     this.client = weaviate.client({
-      scheme: 'http',
-      host: process.env.WEAVIATE_URL || 'localhost:8080',
+      scheme: parsed.protocol.replace(':', '') as 'http' | 'https',
+      host: parsed.host, // e.g. "localhost:8080" without protocol
     });
   }
 

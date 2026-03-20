@@ -58,7 +58,7 @@ export const getNextProblemTool = tool(
 export const runCodeTool = tool(
   async ({ code, language, testCases }) => {
     try {
-      const result = await judge0Service.executeCode(code, language, testCases);
+      const result = await judge0Service.executeCode(code, language, testCases as { input: any; expectedOutput: any }[]);
       return result;
     } catch (error) {
       console.error('Error running code:', error);

@@ -1,294 +1,539 @@
 # DSA AI Coach
 
-An AI-powered platform for mastering Data Structures and Algorithms through pattern-based learning.
+An AI-powered, pattern-based DSA learning platform. Instead of topic-based drill (Arrays → Linked Lists → Trees), you learn **algorithmic patterns** — Two Pointers, Sliding Window, Kadane's Algorithm, Fast & Slow Pointers, etc. — the same mental models that crack FAANG interviews.
 
-## Features
+---
 
-- 🧠 **AI-Powered Learning**: Get personalized hints and explanations from Claude AI
-- 📊 **Pattern-Based Approach**: Master 10 core DSA patterns covering 80% of interview questions
-- 💻 **Interactive Code Editor**: Write and test your code in real-time
-- 📈 **Progress Tracking**: Monitor your improvement with detailed statistics
-- 🔥 **Streak System**: Stay motivated with daily streaks
-- ⚡ **Instant Feedback**: Run code against test cases immediately
-- 🎯 **Adaptive Difficulty**: Problems scale based on your progress
+## Why Pattern-Based Learning?
+
+| Platform | Approach | Problem |
+|----------|----------|---------|
+| LeetCode | Topic drill | No pattern recognition guidance |
+| NeetCode | Curated list | Still topic-based, no AI coaching |
+| AlgoExpert | Video explanations | Passive learning, no adaptive feedback |
+| **DSA AI Coach** | **Pattern-first + AI agent** | **Active coaching, Socratic hints, adapts to you** |
+
+**Key differentiators:**
+- AI coach that gives Socratic hints (never just gives the answer)
+- Learns your weak patterns and surfaces them more
+- Freemium with 3 free patterns — pay once, own it
+- RAG-powered explanations from curated Google Sheets + YouTube transcripts
+- Code execution via Judge0 (sandboxed, multi-language)
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     Next.js 14 Frontend                  │
+│  /auth  /dashboard  /problem  /patterns  /pricing        │
+└──────────────────────┬──────────────────────────────────┘
+                       │ REST (JWT)
+┌──────────────────────▼──────────────────────────────────┐
+│                  Express.js + TypeScript                  │
+│  /api/auth   /api/agent   /api/payments   /api/patterns  │
+└──────┬───────────────┬──────────────────┬───────────────┘
+       │               │                  │
+┌──────▼──────┐ ┌──────▼──────┐ ┌────────▼────────┐
+│  MongoDB    │ │  Weaviate   │ │  Judge0 (code   │
+│  (primary)  │ │  (vector)   │ │   execution)    │
+└─────────────┘ └─────────────┘ └─────────────────┘
+       │
+┌──────▼──────────────────────────────────────────────────┐
+│              LangGraph Agent (Claude 3.5 Sonnet)         │
+│  selectPattern → explainPattern → presentProblem         │
+│  evaluateCode → giveHint → trackProgress → end           │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
 
 ## Tech Stack
 
-### Backend
-- Node.js + Express
-- TypeScript
-- MongoDB (database)
-- Weaviate (vector database for RAG)
-- LangGraph (AI agent workflow)
-- Claude API (LLM)
-- Judge0 (code execution)
-
 ### Frontend
-- Next.js 14
-- React
-- TypeScript
-- Tailwind CSS
-- CodeMirror (code editor)
+| Tech | Version | Purpose |
+|------|---------|---------|
+| Next.js | 14.1 | App Router, SSR/SSG |
+| Tailwind CSS | 3.4 | Utility-first styling |
+| Monaco Editor | latest | In-browser code editor |
+| Lucide React | latest | Icons |
 
-## Prerequisites
+### Backend
+| Tech | Version | Purpose |
+|------|---------|---------|
+| Express.js | 4.x | HTTP server |
+| TypeScript | 5.x | Type safety |
+| LangGraph | 0.1.9 | Stateful AI agent workflow |
+| LangChain Anthropic | 0.2.x | Claude 3.5 Sonnet integration |
+| Mongoose | 8.x | MongoDB ODM |
+| Weaviate Client | 2.x | Vector DB for RAG |
+| Judge0 CE | self-hosted | Sandboxed code execution |
+| bcryptjs | 2.x | Password hashing |
+| jsonwebtoken | 9.x | JWT auth |
+| Stripe | 14.x | Payments |
 
-- Node.js 18+ and npm
-- MongoDB (local or Atlas)
-- Docker (for Weaviate)
-- Anthropic API key
-- Judge0 API key (from RapidAPI)
+### Infrastructure
+| Service | Purpose |
+|---------|---------|
+| MongoDB Atlas / local | User data, progress, sessions |
+| Weaviate | Pattern knowledge embeddings |
+| Redis (planned) | Hot session cache |
+| Vercel | Frontend hosting |
+| Railway / Fly.io | Backend hosting |
+| Docker Compose | Local dev |
 
-## Setup Instructions
+---
 
-### 1. Clone the Repository
+## Database Schema
+
+### `users` collection
+```typescript
+{
+  _id: ObjectId,
+  email: string,           // unique index
+  passwordHash: string,
+  name: string,
+  createdAt: Date,
+
+  // Freemium
+  plan: {
+    type: 'trial' | 'pro' | 'lifetime',
+    stripeCustomerId?: string,
+    stripeSubscriptionId?: string,
+    trialPatternsUsed: string[],  // pattern IDs unlocked in trial
+    activatedAt?: Date,
+    expiresAt?: Date,
+  },
+
+  // Progress
+  currentPattern: string,
+  completedPatterns: string[],
+  totalSolved: number,
+  streak: number,
+  lastActiveAt: Date,
+}
+```
+**Indexes:** `email` (unique), `plan.type`, `lastActiveAt`
+
+### `problems` collection
+```typescript
+{
+  _id: ObjectId,
+  patternId: string,         // e.g. 'two-pointers'
+  title: string,
+  difficulty: 'easy' | 'medium' | 'hard',
+  description: string,
+  examples: [{ input, output, explanation }],
+  constraints: string[],
+  starterCode: { javascript: string, python: string },
+  testCases: [{ input: any, expectedOutput: any, isHidden: boolean }],
+  hints: [{ level: 1|2|3, content: string }],
+  solution: { javascript: string, python: string },
+  order: number,             // within pattern
+  tags: string[],
+}
+```
+**Indexes:** `patternId + order` (compound), `difficulty`
+
+### `progress` collection
+```typescript
+{
+  _id: ObjectId,
+  userId: ObjectId,          // ref: users
+  problemId: ObjectId,       // ref: problems
+  patternId: string,
+  status: 'attempted' | 'solved' | 'skipped',
+  attempts: number,
+  hintsUsed: number,
+  solvedAt?: Date,
+  lastAttemptAt: Date,
+  code?: string,             // last submitted code
+  language?: string,
+  timeSpentMs?: number,
+}
+```
+**Indexes:** `userId + problemId` (unique compound), `userId + patternId`, `userId + status`
+
+### `sessions` collection
+```typescript
+{
+  _id: ObjectId,
+  sessionId: string,         // unique index
+  userId: string,
+  state: Mixed,              // LangGraph agent state
+  expiresAt: Date,           // TTL index, auto-deletes
+}
+```
+**Indexes:** `sessionId` (unique), `userId`, `expiresAt` (TTL, expireAfterSeconds: 0)
+
+### `payments` collection
+```typescript
+{
+  _id: ObjectId,
+  userId: ObjectId,
+  stripePaymentIntentId: string,
+  stripeCustomerId: string,
+  amount: number,            // cents
+  currency: string,
+  status: 'pending' | 'succeeded' | 'failed' | 'refunded',
+  plan: 'pro_monthly' | 'pro_annual' | 'lifetime',
+  createdAt: Date,
+}
+```
+
+---
+
+## Freemium Model
+
+| Feature | Trial | Pro ($9/mo or $79/yr) |
+|---------|-------|----------------------|
+| Patterns accessible | 3 (Two Pointers, Sliding Window, BFS/DFS) | All 20+ patterns |
+| Problems per pattern | Unlimited | Unlimited |
+| AI hints | 3 per problem | Unlimited |
+| Code execution | Yes | Yes |
+| Progress tracking | Yes | Yes |
+| Pattern explanations (RAG) | Yes | Yes |
+
+**Access control:** `planGate.middleware.ts` checks `req.userId` → user's `plan.type` → if trial, verify `trialPatternsUsed` length < 3 before unlocking new pattern.
+
+---
+
+## Stripe Payment Flow
+
+```
+1. User clicks "Upgrade to Pro" on /pricing
+2. Frontend: POST /api/payments/create-checkout-session
+3. Backend: stripe.checkout.sessions.create({ ... })
+4. Redirect to Stripe Checkout hosted page
+5. User pays
+6. Stripe webhook: POST /api/payments/webhook
+7. Backend: verify signature → update user.plan.type = 'pro'
+8. Redirect to /dashboard?upgraded=true
+```
+
+**Webhook events handled:**
+- `checkout.session.completed` — activate pro plan
+- `customer.subscription.deleted` — downgrade to trial
+- `invoice.payment_failed` — email user (future)
+
+---
+
+## RAG Pipeline
+
+### Ingestion (run once / on update)
+```
+Google Sheet (pattern metadata, problem links)
+    ↓ googleapis SDK
+    ↓ Parse rows → PatternKnowledge[]
+
+YouTube playlist (pattern explanations)
+    ↓ youtube-transcript-api
+    ↓ Extract transcript text per video
+
+Combined documents
+    ↓ LangChain RecursiveCharacterTextSplitter (chunk: 500, overlap: 50)
+    ↓ Weaviate text2vec-transformers (all-MiniLM-L6-v2)
+    ↓ Store in Weaviate class "PatternKnowledge"
+```
+
+Run: `npm run seed:patterns` (from backend directory)
+
+### Query (per request)
+```
+User question / pattern name
+    ↓ Weaviate nearText search (top 3 chunks)
+    ↓ Inject into LangGraph explainPattern node prompt
+    ↓ Claude 3.5 Sonnet generates explanation
+```
+
+---
+
+## LangGraph Agent Design
+
+### State
+```typescript
+interface AgentState {
+  userId: string;
+  sessionId: string;
+  currentPattern: string;
+  currentProblem: Problem | null;
+  userCode: string;
+  language: 'javascript' | 'python';
+  messages: BaseMessage[];
+  hints: Hint[];
+  hintLevel: number;
+  attemptCount: number;
+  passed: boolean;
+  executionResult: ExecutionResult | null;
+  patternContext: string;      // RAG-retrieved content
+  action: AgentAction;
+}
+```
+
+### Node Graph
+```
+START
+  │
+  ▼
+selectPattern ──────── [RAG: fetch pattern context]
+  │                     [DB: get user's current pattern]
+  ▼
+explainPattern ─────── [Claude: generate Socratic intro]
+  │                     [RAG: inject pattern knowledge]
+  ▼
+presentProblem ──────── [DB: select next problem for user]
+  │
+  ▼ (user submits code)
+evaluateCode ───────── [Judge0: run test cases]
+  │
+  ├── passed=true ──→ trackProgress ──→ END
+  │
+  └── passed=false
+        │
+        ├── attemptCount < 3 ──→ END (return feedback)
+        │
+        └── attemptCount >= 3 ──→ giveHint ──→ END
+              │
+              └── hintLevel 1→2→3 (Socratic → pseudocode → solution)
+```
+
+### Conditional Edge Logic
+```typescript
+function routeAfterEval(state: AgentState): string {
+  if (state.passed) return 'trackProgress';
+  if (state.attemptCount >= 3) return 'giveHint';
+  return END;
+}
+```
+
+---
+
+## API Surface
+
+### Auth
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/auth/register` | None | Create account |
+| POST | `/api/auth/login` | None | Get JWT token |
+
+### Agent
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/agent/session/start` | JWT | Start/resume session |
+| POST | `/api/agent/session/:id/submit` | JWT | Submit code |
+| POST | `/api/agent/session/:id/hint` | JWT | Request hint |
+| POST | `/api/agent/session/:id/next` | JWT | Skip to next problem |
+
+### Payments
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/payments/create-checkout-session` | JWT | Stripe checkout |
+| POST | `/api/payments/webhook` | Stripe sig | Handle events |
+| GET | `/api/payments/status` | JWT | Current plan status |
+
+### Patterns
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/patterns` | JWT | List all patterns + lock status |
+| GET | `/api/patterns/:id` | JWT | Pattern detail + problems |
+| GET | `/api/patterns/:id/progress` | JWT | User progress for pattern |
+
+### Progress
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/progress/stats` | JWT | Dashboard stats |
+| GET | `/api/progress/history` | JWT | Solved problems history |
+
+---
+
+## Local Development
+
+### Prerequisites
+- Node.js 20+
+- Docker Desktop
+- npm 10+
+
+### Setup
+
 ```bash
-git clone <repository-url>
+# Clone repo
+git clone https://github.com/YOUR_USERNAME/dsa-ai-coach.git
 cd dsa-ai-coach
-```
 
-### 2. Install Dependencies
-```bash
-# Install root dependencies
+# Install all dependencies
 npm install
 
-# Install backend dependencies
+# Start infrastructure (MongoDB + Weaviate)
+docker compose up -d
+
+# Backend setup
 cd backend
-npm install
+cp .env.example .env   # fill in ANTHROPIC_API_KEY, JWT_SECRET
+npm run seed:patterns  # load pattern knowledge into Weaviate
+npm run dev
 
-# Install frontend dependencies
-cd ../frontend
-npm install
+# Frontend setup (separate terminal)
+cd frontend
+cp .env.example .env   # set NEXT_PUBLIC_API_URL=http://localhost:3001
+npx next dev
 ```
 
-### 3. Set Up Weaviate (Vector Database)
-```bash
-# Run Weaviate with Docker
-docker run -d \
-  -p 8080:8080 \
-  -e QUERY_DEFAULTS_LIMIT=25 \
-  -e AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true \
-  -e PERSISTENCE_DATA_PATH='/var/lib/weaviate' \
-  -e DEFAULT_VECTORIZER_MODULE='text2vec-transformers' \
-  -e ENABLE_MODULES='text2vec-transformers' \
-  -e TRANSFORMERS_INFERENCE_API='http://t2v-transformers:8080' \
-  --name weaviate \
-  semitechnologies/weaviate:latest
+Frontend: http://localhost:3000
+Backend: http://localhost:3001
+Weaviate: http://localhost:8080
+
+### Environment Variables
+
+**backend/.env**
 ```
-
-### 4. Set Up MongoDB
-
-**Option A: Local MongoDB**
-```bash
-# Install and start MongoDB
-mongod --dbpath /path/to/data
-```
-
-**Option B: MongoDB Atlas**
-- Create a free cluster at mongodb.com/cloud/atlas
-- Get your connection string
-
-### 5. Get API Keys
-
-**Anthropic API Key:**
-1. Go to https://console.anthropic.com
-2. Create an account and get API key
-3. Free tier available
-
-**Judge0 API Key:**
-1. Go to https://rapidapi.com/judge0-official/api/judge0-ce
-2. Subscribe to free tier
-3. Get your API key
-
-### 6. Configure Environment Variables
-
-**Backend (.env):**
-```bash
-cd backend
-cp .env.example .env
-```
-
-Edit `backend/.env`:
-```env
-MONGODB_URI=mongodb://localhost:27017/dsa-coach
-ANTHROPIC_API_KEY=your_anthropic_key_here
-JUDGE0_API_KEY=your_judge0_key_here
-JUDGE0_BASE_URL=https://judge0-ce.p.rapidapi.com
-WEAVIATE_URL=http://localhost:8080
 PORT=3001
-FRONTEND_URL=http://localhost:3000
+MONGODB_URI=mongodb://localhost:27017/dsa-coach
+WEAVIATE_URL=http://localhost:8080
+ANTHROPIC_API_KEY=sk-ant-...
+JWT_SECRET=your-long-random-secret
+JUDGE0_API_URL=http://localhost:2358
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
 ```
 
-**Frontend (.env.local):**
-```bash
-cd frontend
-cp .env.local.example .env.local
+**frontend/.env**
 ```
-
-Edit `frontend/.env.local`:
-```env
 NEXT_PUBLIC_API_URL=http://localhost:3001
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 ```
 
-### 7. Seed the Database
-```bash
-# From backend directory
-cd backend
-
-# Import problems
-npm run seed
-
-# This will:
-# - Connect to MongoDB
-# - Import DSA problems
-# - Seed pattern knowledge in Weaviate
-```
-
-### 8. Run the Application
-
-**Terminal 1 - Backend:**
-```bash
-cd backend
-npm run dev
-```
-
-**Terminal 2 - Frontend:**
-```bash
-cd frontend
-npm run dev
-```
-
-### 9. Access the Application
-
-Open your browser and navigate to:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:3001
-- Health Check: http://localhost:3001/health
+---
 
 ## Project Structure
+
 ```
 dsa-ai-coach/
 ├── backend/
 │   ├── src/
-│   │   ├── agent/          # LangGraph agent logic
-│   │   ├── models/         # MongoDB models
-│   │   ├── routes/         # API routes
-│   │   ├── services/       # External services
-│   │   ├── scripts/        # Database seeding
-│   │   └── server.ts       # Main server
+│   │   ├── agent/              # LangGraph workflow + nodes + tools
+│   │   │   ├── workflow.ts     # StateGraph definition
+│   │   │   ├── nodes.ts        # Node implementations
+│   │   │   └── tools.ts        # Agent tools (code eval, hints)
+│   │   ├── middleware/
+│   │   │   ├── auth.middleware.ts     # JWT verification
+│   │   │   └── planGate.middleware.ts # Freemium access control
+│   │   ├── models/
+│   │   │   ├── User.ts
+│   │   │   ├── Problem.ts
+│   │   │   ├── Progress.ts
+│   │   │   ├── Session.ts      # MongoDB TTL sessions
+│   │   │   └── Payment.ts
+│   │   ├── routes/
+│   │   │   ├── auth.routes.ts
+│   │   │   ├── agent.routes.ts
+│   │   │   ├── patterns.routes.ts
+│   │   │   ├── progress.routes.ts
+│   │   │   └── payment.routes.ts
+│   │   ├── services/
+│   │   │   ├── rag.service.ts       # Weaviate vector search
+│   │   │   ├── session.service.ts   # MongoDB session CRUD
+│   │   │   ├── judge0.service.ts    # Code execution
+│   │   │   └── stripe.service.ts   # Payment processing
+│   │   ├── scripts/
+│   │   │   ├── seedPatterns.ts     # RAG ingestion
+│   │   │   └── seedProblems.ts     # Problem seeding
+│   │   └── server.ts
 │   └── package.json
 │
 ├── frontend/
-│   ├── app/                # Next.js pages
-│   ├── components/         # React components
-│   ├── lib/                # Utilities
+│   ├── app/
+│   │   ├── auth/page.tsx        # Login / Register
+│   │   ├── dashboard/page.tsx   # Main dashboard
+│   │   ├── problem/page.tsx     # Problem solving interface
+│   │   ├── patterns/page.tsx    # Pattern explorer
+│   │   ├── pricing/page.tsx     # Upgrade page
+│   │   └── layout.tsx
+│   ├── components/
+│   │   ├── CodeEditor.tsx
+│   │   ├── HintPanel.tsx
+│   │   ├── ProgressTracker.tsx
+│   │   └── TestResults.tsx
+│   ├── lib/
+│   │   └── api.ts               # JWT-aware API client
 │   └── package.json
 │
+├── docker-compose.yml
 └── README.md
 ```
 
-## Usage
+---
 
-1. **Start Learning**: Click "Get Started" on the home page
-2. **Learn Pattern**: Read the AI-generated pattern explanation
-3. **Solve Problem**: Write code in the interactive editor
-4. **Get Hints**: Request progressive hints if stuck (after 1 attempt)
-5. **Submit Code**: Run against test cases for instant feedback
-6. **Track Progress**: Monitor your improvement on the dashboard
+## Deployment
 
-## API Endpoints
+### Production Stack
+| Service | Provider | Notes |
+|---------|----------|-------|
+| Frontend | Vercel | Auto-deploy from `main` |
+| Backend | Railway / Fly.io | Dockerfile in `/backend` |
+| MongoDB | MongoDB Atlas (M10+) | Enable indexing |
+| Weaviate | Weaviate Cloud | Or self-host on Railway |
+| Judge0 | Self-host on Fly.io | Or RapidAPI hosted |
 
-### Agent Routes
-- `POST /api/agent/start-session` - Start a new learning session
-- `POST /api/agent/submit-code` - Submit code for evaluation
-- `POST /api/agent/request-hint` - Request a hint
-- `GET /api/agent/session/:sessionId` - Get session state
-- `POST /api/agent/next-problem` - Get next problem
-
-### Problem Routes
-- `GET /api/problems` - Get all problems
-- `GET /api/problems/:id` - Get problem by ID
-- `GET /api/problems/pattern/:pattern` - Get problems by pattern
-
-### Progress Routes
-- `GET /api/progress/:userId` - Get user progress
-- `GET /api/progress/:userId/stats` - Get detailed statistics
-- `POST /api/progress/:userId/streak` - Update streak
-
-## Troubleshooting
-
-### Weaviate Connection Issues
+### Deploy
 ```bash
-# Check if Weaviate is running
-curl http://localhost:8080/v1/.well-known/ready
+# Frontend (Vercel)
+cd frontend && vercel --prod
 
-# Restart Weaviate
-docker restart weaviate
+# Backend (Railway)
+railway up
 ```
-
-### MongoDB Connection Issues
-```bash
-# Check MongoDB status
-mongosh --eval "db.adminCommand('ping')"
-```
-
-### Judge0 Rate Limits
-- Free tier: 50 requests/day
-- Consider upgrading or implementing caching
-
-## Development
-
-### Adding New Problems
-
-Edit `backend/src/scripts/importProblems.ts`:
-```typescript
-const newProblem = {
-  id: 4,
-  title: "Your Problem",
-  difficulty: "medium",
-  pattern: "Arrays & Hashing",
-  // ... rest of problem data
-};
-```
-
-Run:
-```bash
-cd backend
-npm run seed
-```
-
-### Adding New Patterns
-
-Edit `backend/src/scripts/seedPatterns.ts` and add pattern knowledge.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## License
-
-MIT License
-
-## Support
-
-For issues and questions:
-- Open an issue on GitHub
-- Check existing documentation
-- Review API logs
-
-## Roadmap
-
-- [ ] Add more DSA problems (100+)
-- [ ] Multi-language support (Java, C++, Go)
-- [ ] Video explanations
-- [ ] Interview preparation mode
-- [ ] Company-specific problem sets
-- [ ] Code review feature
-- [ ] Peer comparison
-- [ ] Mobile app
 
 ---
 
-Built with ❤️ for aspiring software engineers
+## Development Roadmap
+
+### Phase 0 — Foundation (complete)
+- [x] Next.js 14 + Tailwind CSS
+- [x] Express.js + TypeScript backend
+- [x] MongoDB models (User, Session, Problem, Progress)
+- [x] JWT authentication (register / login)
+- [x] LangGraph agent workflow (chained nodes)
+- [x] Judge0 code execution
+- [x] Weaviate RAG service
+- [x] Docker Compose local dev
+- [x] Dashboard UI redesign
+- [x] MongoDB session persistence (TTL)
+- [x] Auth middleware + protected routes
+
+### Phase 1 — Core Product
+- [ ] Freemium access control (`planGate.middleware.ts`)
+- [ ] Pattern explorer page (`/patterns`)
+- [ ] Stripe payment integration + pricing page
+- [ ] RAG ingestion pipeline (Google Sheets + YouTube)
+- [ ] Problem seeding (20+ problems across 5 patterns)
+- [ ] Rate limiting + Zod request validation
+
+### Phase 2 — Growth
+- [ ] Redis session cache (hot path)
+- [ ] Email verification + password reset
+- [ ] Google OAuth
+- [ ] Leaderboard / community
+- [ ] Spaced repetition difficulty adjustment
+
+### Phase 3 — Scale
+- [ ] Mobile app (React Native)
+- [ ] Team / enterprise plans
+- [ ] Interview simulator (timed, no hints)
+- [ ] Company-specific problem sets
+
+---
+
+## Contributing
+
+1. Fork the repo
+2. Create feature branch: `git checkout -b feat/your-feature`
+3. Commit: `git commit -m 'feat: add your feature'`
+4. Push: `git push origin feat/your-feature`
+5. Open a Pull Request
+
+---
+
+## License
+
+MIT

@@ -1,5 +1,5 @@
 // backend/src/agent/workflow.ts
-import { StateGraph, END } from '@langchain/langgraph';
+import { StateGraph, END, START } from '@langchain/langgraph';
 import { AgentState, AgentStateType } from './state';
 import {
   selectPatternNode,
@@ -12,20 +12,22 @@ import {
   waitForAttemptNode
 } from './nodes';
 
-// Create the workflow graph
-const workflow = new StateGraph(AgentState);
+// Chain addNode calls — LangGraph accumulates node name types via return type
+// so edges can be type-checked against the full node union.
+const workflow = new StateGraph(AgentState)
+  .addNode('selectPattern', selectPatternNode)
+  .addNode('explainPattern', explainPatternNode)
+  .addNode('selectProblem', selectProblemNode)
+  .addNode('waitForAttempt', waitForAttemptNode)
+  .addNode('runCode', runCodeNode)
+  .addNode('provideFeedback', provideFeedbackNode)
+  .addNode('generateHint', generateHintNode)
+  .addNode('analyzeSolution', analyzeSolutionNode);
 
-// Add nodes
-workflow.addNode('selectPattern', selectPatternNode);
-workflow.addNode('explainPattern', explainPatternNode);
-workflow.addNode('selectProblem', selectProblemNode);
-workflow.addNode('waitForAttempt', waitForAttemptNode);
-workflow.addNode('runCode', runCodeNode);
-workflow.addNode('provideFeedback', provideFeedbackNode);
-workflow.addNode('generateHint', generateHintNode);
-workflow.addNode('analyzeSolution', analyzeSolutionNode);
+// Entry point
+workflow.addEdge(START, 'selectPattern');
 
-// Define the workflow edges
+// Linear edges
 workflow.addEdge('selectPattern', 'explainPattern');
 workflow.addEdge('explainPattern', 'selectProblem');
 workflow.addEdge('selectProblem', 'waitForAttempt');
@@ -62,9 +64,6 @@ workflow.addConditionalEdges(
     'SELECT_PATTERN': 'selectPattern'
   }
 );
-
-// Set entry point
-workflow.setEntryPoint('selectPattern');
 
 // Compile the workflow
 export const agentWorkflow = workflow.compile();
