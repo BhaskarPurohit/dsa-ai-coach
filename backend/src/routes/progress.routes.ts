@@ -51,31 +51,33 @@ router.get('/:userId/stats', async (req, res) => {
     const mediumCount = await Problem.countDocuments({ difficulty: 'medium' });
     const hardCount = await Problem.countDocuments({ difficulty: 'hard' });
 
+    const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);
+
     const stats = {
       overall: {
         solved: progress.problemsSolved.length,
         total: totalProblems,
-        percentage: Math.round((progress.problemsSolved.length / totalProblems) * 100)
+        percentage: pct(progress.problemsSolved.length, totalProblems)
       },
       byDifficulty: {
         easy: {
           solved: progress.statistics.easyProblems,
           total: easyCount,
-          percentage: Math.round((progress.statistics.easyProblems / easyCount) * 100)
+          percentage: pct(progress.statistics.easyProblems, easyCount)
         },
         medium: {
           solved: progress.statistics.mediumProblems,
           total: mediumCount,
-          percentage: Math.round((progress.statistics.mediumProblems / mediumCount) * 100)
+          percentage: pct(progress.statistics.mediumProblems, mediumCount)
         },
         hard: {
           solved: progress.statistics.hardProblems,
           total: hardCount,
-          percentage: Math.round((progress.statistics.hardProblems / hardCount) * 100)
+          percentage: pct(progress.statistics.hardProblems, hardCount)
         }
       },
       patterns: {
-        completed: progress.patternsCompleted.length,
+        completed: progress.patternsCompleted,   // array of names, not .length
         current: progress.currentPattern,
         weak: progress.weakPatterns
       },

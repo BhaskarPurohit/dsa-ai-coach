@@ -66,7 +66,9 @@ export default function Dashboard() {
   const handleStartLearning = () => router.push('/problem');
   const handleLogout = () => authAPI.logout();
 
-  const completedPatterns: string[] = stats?.patterns?.completed ?? [];
+  const completedPatterns: string[] = Array.isArray(stats?.patterns?.completed)
+    ? stats.patterns.completed
+    : [];
   const currentPattern: string = stats?.patterns?.current ?? '';
   const currentIndex = ALL_PATTERNS.findIndex(p => p.name === currentPattern);
 
