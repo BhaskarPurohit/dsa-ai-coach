@@ -186,6 +186,14 @@ An AI-powered, pattern-based DSA learning platform. Instead of topic-based drill
 
 ## Freemium Model
 
+**Freemium = Free + Premium.** Users get a working, valuable product for free — enough to experience the core loop and see results. When they hit the limit, they upgrade. The business only works if the free tier is genuinely useful (not crippled), but leaves a clear reason to pay.
+
+In this app:
+- **Free (Trial):** First 3 patterns fully unlocked — Two Pointers, Sliding Window, BFS/DFS. No credit card. No time limit. Users can solve unlimited problems, get AI hints, and see their progress.
+- **Pro:** All 20+ patterns, unlimited hints. Pay monthly or annually.
+
+The 3-pattern limit is intentional: it's enough to get hooked, not enough to finish interview prep.
+
 | Feature | Trial | Pro ($9/mo or $79/yr) |
 |---------|-------|----------------------|
 | Patterns accessible | 3 (Two Pointers, Sliding Window, BFS/DFS) | All 20+ patterns |
@@ -195,7 +203,16 @@ An AI-powered, pattern-based DSA learning platform. Instead of topic-based drill
 | Progress tracking | Yes | Yes |
 | Pattern explanations (RAG) | Yes | Yes |
 
-**Access control:** `planGate.middleware.ts` checks `req.userId` → user's `plan.type` → if trial, verify `trialPatternsUsed` length < 3 before unlocking new pattern.
+**Access control flow:**
+```
+Request to unlock new pattern
+    ↓ planGate.middleware.ts
+    ↓ Look up user.plan.type
+    ├── 'pro' or 'lifetime' → allow
+    └── 'trial' → check trialPatternsUsed.length
+          ├── < 3 → add pattern to trialPatternsUsed, allow
+          └── >= 3 → 403 { upgrade: true } → frontend shows /pricing
+```
 
 ---
 
@@ -221,30 +238,69 @@ An AI-powered, pattern-based DSA learning platform. Instead of topic-based drill
 
 ## RAG Pipeline
 
-### Ingestion (run once / on update)
+RAG (Retrieval-Augmented Generation) means the AI's explanations are grounded in real content you curate — not hallucinated. When a user asks "explain Two Pointers", the agent searches your knowledge base for the most relevant chunks and injects them into Claude's prompt as context before generating a response.
+
+### How YouTube transcripts work
+
+YouTube auto-generates transcripts for almost every video. The `youtube-transcript` npm package can pull them **without a YouTube API key** — it just hits the same endpoint the YouTube UI uses.
+
 ```
-Google Sheet (pattern metadata, problem links)
-    ↓ googleapis SDK
-    ↓ Parse rows → PatternKnowledge[]
+You provide: playlist URL
+    e.g. NeetCode's Two Pointers playlist
 
-YouTube playlist (pattern explanations)
-    ↓ youtube-transcript-api
-    ↓ Extract transcript text per video
+Script fetches: all video IDs from the playlist
+    ↓ youtube-transcript npm package (no API key needed)
+    ↓ Pulls raw transcript text per video
 
-Combined documents
-    ↓ LangChain RecursiveCharacterTextSplitter (chunk: 500, overlap: 50)
+Example transcript chunk (Two Pointers - Valid Palindrome):
+    "...so the key insight here is we can use two pointers,
+    one starting from the left and one from the right.
+    We move them toward each other, comparing characters..."
+
+That text gets chunked and embedded → stored in Weaviate
+```
+
+The AI explanations are literally grounded in the video content — same knowledge the creator intended to teach, delivered interactively.
+
+### Ingestion pipeline (run once / on update)
+
+```
+Google Sheet (pattern metadata, curated YouTube URLs)
+    ↓ googleapis SDK (needs GOOGLE_SHEETS_API_KEY)
+    ↓ Parse rows → [{ patternId, videoUrl, description }]
+
+For each YouTube URL:
+    ↓ youtube-transcript package
+    ↓ Raw transcript text (no API key needed)
+    ↓ Clean + format text
+
+Combined documents (Google Sheet metadata + transcripts)
+    ↓ LangChain RecursiveCharacterTextSplitter
+      chunk size: 500 chars, overlap: 50 chars
     ↓ Weaviate text2vec-transformers (all-MiniLM-L6-v2)
     ↓ Store in Weaviate class "PatternKnowledge"
+      { patternId, content, source, videoTitle }
 ```
 
 Run: `npm run seed:patterns` (from backend directory)
 
-### Query (per request)
+### Google Sheet format
+
+| patternId | title | videoUrl | description |
+|-----------|-------|----------|-------------|
+| two-pointers | Two Pointers | https://youtube.com/watch?v=... | Core pattern for sorted array problems |
+| sliding-window | Sliding Window | https://youtube.com/watch?v=... | Variable and fixed window variants |
+
+### Query (per agent request)
+
 ```
-User question / pattern name
-    ↓ Weaviate nearText search (top 3 chunks)
-    ↓ Inject into LangGraph explainPattern node prompt
-    ↓ Claude 3.5 Sonnet generates explanation
+User starts session for "Two Pointers"
+    ↓ ragService.getPatternContext('two-pointers')
+    ↓ Weaviate nearText search: top 3 most relevant chunks
+    ↓ Returned chunks injected into explainPattern node prompt:
+      "Here is knowledge about this pattern: [chunks]
+       Explain it to the student in a Socratic way..."
+    ↓ Claude generates explanation grounded in your curated content
 ```
 
 ---
@@ -466,14 +522,53 @@ dsa-ai-coach/
 
 ## Deployment
 
+### Minimum Infrastructure Cost to Launch
+
+You do not need to spend much at launch. Here is the cheapest stack that is production-ready:
+
+| Service | Provider | Free Tier | Paid (minimum) | Notes |
+|---------|----------|-----------|----------------|-------|
+| Frontend | Vercel | Free forever | $0 | Unlimited deploys on Hobby plan |
+| Backend | Railway | $5/mo credit | $5/mo | ~512MB RAM, enough for early users |
+| MongoDB | Atlas M0 | Free (512MB) | $0 | Shared cluster, no credit card |
+| Weaviate | Self-hosted on Railway | — | ~$0–5/mo | Uses same Railway instance; or Weaviate Cloud Sandbox (free, 14-day limit) |
+| Judge0 | RapidAPI free tier | 50 req/day | $0 | Enough for testing; self-host on Railway for prod |
+| Anthropic API | Pay-per-use | None | ~$5–20/mo | Claude 3.5 Sonnet: $3/MTok in, $15/MTok out |
+| Stripe | None | Free | 2.9% + 30¢/txn | No monthly fee until you charge users |
+| Domain | Namecheap / Cloudflare | None | ~$10/yr | Optional at launch |
+
+**Total at launch: ~$10–30/month** (before you have paying users)
+
+Once you have paying users, a single Pro subscriber at $9/mo covers your base infra cost.
+
+#### Cost breakdown as you scale
+
+| Users (MAU) | Est. monthly cost | Revenue needed to break even |
+|-------------|-------------------|------------------------------|
+| 0–100 | ~$15/mo | 2 Pro subscribers |
+| 100–1,000 | ~$40–80/mo | 5–9 Pro subscribers |
+| 1,000–10,000 | ~$150–300/mo | Upgrade Atlas M10 + Railway Pro |
+
+#### Cheapest possible stack (pre-launch / testing)
+
+| Service | Option | Cost |
+|---------|--------|------|
+| Frontend | Vercel Hobby | $0 |
+| Backend | Railway free credit | $0 (first month) |
+| MongoDB | Atlas M0 | $0 |
+| Weaviate | Weaviate Cloud Sandbox | $0 (14 days) |
+| Judge0 | RapidAPI free | $0 |
+| AI | Anthropic pay-as-you-go | ~$1–5/mo at low usage |
+| **Total** | | **~$1–5/mo** |
+
 ### Production Stack
 | Service | Provider | Notes |
 |---------|----------|-------|
 | Frontend | Vercel | Auto-deploy from `main` |
 | Backend | Railway / Fly.io | Dockerfile in `/backend` |
-| MongoDB | MongoDB Atlas (M10+) | Enable indexing |
-| Weaviate | Weaviate Cloud | Or self-host on Railway |
-| Judge0 | Self-host on Fly.io | Or RapidAPI hosted |
+| MongoDB | MongoDB Atlas (M10+) | Upgrade from M0 at ~1,000 users |
+| Weaviate | Self-hosted on Railway | Or Weaviate Cloud ($25/mo) |
+| Judge0 | Self-hosted on Railway | Or RapidAPI Basic ($10/mo) |
 
 ### Deploy
 ```bash
