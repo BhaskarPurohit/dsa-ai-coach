@@ -7,7 +7,11 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "seed": "ts-node src/scripts/importProblems.ts",
-    "seed:patterns": "ts-node src/scripts/seedPatterns.ts"
+    "seed:patterns": "ts-node src/scripts/seedPatterns.ts",
+    "parse:sheet": "ts-node src/scripts/parseSheet.ts",
+    "seed:problems": "ts-node src/scripts/seedFromSheet.ts",
+    "setup:weaviate": "ts-node src/scripts/setupWeaviate.ts",
+    "setup:db": "ts-node src/scripts/setupDB.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",
@@ -23,6 +27,7 @@
     "mongoose": "^8.0.0",
     "uuid": "^9.0.1",
     "weaviate-ts-client": "^2.0.0",
+    "xlsx": "^0.18.5",
     "zod": "^3.22.4"
   },
   "devDependencies": {
