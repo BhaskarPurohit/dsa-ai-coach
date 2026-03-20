@@ -14,8 +14,19 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
+const allowedOrigin = process.env.NODE_ENV === 'production'
+  ? process.env.FRONTEND_URL!
+  : (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+      // In dev, allow any localhost origin (covers port 3000, 3001, 3002, etc.)
+      if (!origin || /^http:\/\/localhost:\d+$/.test(origin)) {
+        cb(null, true);
+      } else {
+        cb(new Error(`CORS: origin ${origin} not allowed`));
+      }
+    };
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: allowedOrigin,
   credentials: true
 }));
 app.use(express.json());
