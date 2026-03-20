@@ -7,7 +7,16 @@ import { agentAPI, authAPI } from '@/lib/api';
 import CodeEditor from '@/components/CodeEditor';
 import HintPanel from '@/components/HintPanel';
 import TestResults from '@/components/TestResults';
-import { Play, Lightbulb, SkipForward, Home } from 'lucide-react';
+import { Play, Lightbulb, SkipForward, Home, History, ChevronDown, ChevronUp, Star } from 'lucide-react';
+
+type MasteryLevel = 'developing' | 'proficient' | 'advanced' | 'expert';
+
+const MASTERY_CONFIG: Record<MasteryLevel, { label: string; color: string; bg: string }> = {
+  developing:  { label: 'Developing',  color: 'text-gray-600',    bg: 'bg-gray-100'    },
+  proficient:  { label: 'Proficient',  color: 'text-blue-600',    bg: 'bg-blue-100'    },
+  advanced:    { label: 'Advanced',    color: 'text-violet-600',  bg: 'bg-violet-100'  },
+  expert:      { label: 'Expert',      color: 'text-amber-600',   bg: 'bg-amber-100'   },
+};
 
 export default function ProblemPage() {
   const router = useRouter();
@@ -15,7 +24,7 @@ export default function ProblemPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [requestingHint, setRequestingHint] = useState(false);
-  
+
   const [currentPattern, setCurrentPattern] = useState('');
   const [currentProblem, setCurrentProblem] = useState<any>(null);
   const [code, setCode] = useState('');
@@ -25,6 +34,9 @@ export default function ProblemPage() {
   const [testResults, setTestResults] = useState<any>(null);
   const [attemptCount, setAttemptCount] = useState(0);
   const [hintLevel, setHintLevel] = useState(0);
+  const [masteryLevel, setMasteryLevel] = useState<MasteryLevel>('developing');
+  const [codeHistory, setCodeHistory] = useState<any[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
     if (!authAPI.isAuthenticated()) {
@@ -69,7 +81,9 @@ export default function ProblemPage() {
       setTestResults(response.executionResult);
       setAttemptCount(response.attemptCount);
       setMessages([...messages, ...response.messages]);
-      
+      if (response.masteryLevel) setMasteryLevel(response.masteryLevel);
+      if (response.codeHistory) setCodeHistory(response.codeHistory);
+
       if (response.passed) {
         setTimeout(() => {
           handleNextProblem();
@@ -170,6 +184,11 @@ export default function ProblemPage() {
             <div className="flex items-center gap-2">
               <span className={`badge badge-${currentProblem.difficulty}`}>
                 {currentProblem.difficulty}
+              </span>
+              {/* Mastery level badge — CodeSignal style */}
+              <span className={`text-xs font-semibold px-2 py-1 rounded-full flex items-center gap-1 ${MASTERY_CONFIG[masteryLevel].bg} ${MASTERY_CONFIG[masteryLevel].color}`}>
+                <Star className="w-3 h-3" />
+                {MASTERY_CONFIG[masteryLevel].label}
               </span>
               <button
                 onClick={handleNextProblem}
@@ -314,9 +333,41 @@ export default function ProblemPage() {
                 </button>
               </div>
 
+              {/* Attempt counter — positive framing like CodeSignal */}
               {attemptCount > 0 && (
-                <div className="mt-3 text-sm text-gray-600">
-                  Attempts: {attemptCount}
+                <div className="mt-3 flex items-center justify-between text-sm">
+                  <span className="text-gray-500">
+                    Attempt {attemptCount} — {attemptCount < 3 ? 'keep iterating!' : 'you can request hints anytime'}
+                  </span>
+                  {codeHistory.length > 1 && (
+                    <button
+                      onClick={() => setShowHistory(h => !h)}
+                      className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600"
+                    >
+                      <History className="w-3.5 h-3.5" />
+                      Previous attempts
+                      {showHistory ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Code history panel — CodeSignal lets you see past submissions */}
+              {showHistory && codeHistory.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {[...codeHistory].reverse().slice(1).map((entry: any, i: number) => (
+                    <details key={i} className="rounded-lg border border-gray-200 overflow-hidden">
+                      <summary className="flex items-center justify-between px-3 py-2 bg-gray-50 cursor-pointer text-xs text-gray-600 select-none">
+                        <span>Attempt {entry.attemptNum}</span>
+                        <span className={entry.result?.passed ? 'text-success-600' : 'text-danger-600'}>
+                          {entry.result?.passed ? 'Passed' : `${entry.result?.passedTests ?? 0}/${entry.result?.totalTests ?? '?'} cases`}
+                        </span>
+                      </summary>
+                      <pre className="p-3 text-xs bg-gray-900 text-gray-100 overflow-x-auto max-h-40">
+                        {entry.code}
+                      </pre>
+                    </details>
+                  ))}
                 </div>
               )}
             </div>

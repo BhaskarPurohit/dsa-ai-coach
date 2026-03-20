@@ -18,7 +18,15 @@ export const AgentState = Annotation.Root({
     timestamp: Date;
   }>>,
   userProgress: Annotation<any>,
-  patternExplanationGiven: Annotation<boolean>
+  patternExplanationGiven: Annotation<boolean>,
+  // CodeSignal-inspired additions
+  masteryLevel: Annotation<'developing' | 'proficient' | 'advanced' | 'expert'>,
+  codeHistory: Annotation<Array<{
+    code: string;
+    result: any;
+    attemptNum: number;
+    timestamp: Date;
+  }>>,
 });
 
 export type AgentStateType = typeof AgentState.State;

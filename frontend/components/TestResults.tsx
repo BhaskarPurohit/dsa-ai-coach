@@ -12,14 +12,35 @@ interface TestResultsProps {
 export default function TestResults({ result }: TestResultsProps) {
   if (!result) return null;
 
+  const allFailed = result.passedTests === 0;
+  const somePassed = result.passedTests > 0 && !result.passed;
+
   return (
     <div className="card mt-4">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold">Test Results</h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-base font-semibold">Test Results</h3>
         <div className={`badge ${result.passed ? 'badge-easy' : 'badge-hard'}`}>
-          {result.passedTests}/{result.totalTests} Passed
+          {result.passedTests}/{result.totalTests} passed
         </div>
       </div>
+
+      {/* CodeSignal-style: positive framing on failure */}
+      {!result.passed && (
+        <div className={`rounded-lg p-3 mb-4 text-sm ${
+          somePassed
+            ? 'bg-amber-50 border border-amber-200 text-amber-800'
+            : 'bg-blue-50 border border-blue-200 text-blue-800'
+        }`}>
+          {somePassed
+            ? `Good progress — ${result.passedTests} of ${result.totalTests} cases passing. Check the failing case below.`
+            : `No passing cases yet — that's okay. Review the input/output below and look for the pattern.`}
+        </div>
+      )}
+      {result.passed && (
+        <div className="rounded-lg p-3 mb-4 text-sm bg-success-50 border border-success-200 text-success-800">
+          All test cases passed. Moving to solution analysis...
+        </div>
+      )}
 
       <div className="space-y-3">
         {result.results.map((test, index) => (

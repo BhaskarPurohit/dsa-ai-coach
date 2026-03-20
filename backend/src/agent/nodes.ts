@@ -10,6 +10,7 @@ import {
   selectNextPatternTool
 } from './tools';
 import Progress from '../models/Progress';
+import { claudeService } from '../services/claude.service';
 
 export async function selectPatternNode(state: AgentStateType): Promise<Partial<AgentStateType>> {
   try {
@@ -128,11 +129,18 @@ export async function runCodeNode(state: AgentStateType): Promise<Partial<AgentS
 
     const newAttemptCount = state.attemptCount + 1;
 
+    // Keep last 5 attempts in code history (CodeSignal shows previous submissions)
+    const newHistory = [
+      ...(state.codeHistory || []).slice(-4),
+      { code: state.userCode!, result, attemptNum: newAttemptCount, timestamp: new Date() }
+    ];
+
     if (result.passed) {
       return {
         ...state,
         executionResult: result,
         attemptCount: newAttemptCount,
+        codeHistory: newHistory,
         nextAction: 'ANALYZE_SOLUTION'
       };
     } else {
@@ -140,15 +148,8 @@ export async function runCodeNode(state: AgentStateType): Promise<Partial<AgentS
         ...state,
         executionResult: result,
         attemptCount: newAttemptCount,
+        codeHistory: newHistory,
         nextAction: 'PROVIDE_FEEDBACK',
-        conversationHistory: [
-          ...state.conversationHistory,
-          {
-            role: 'system',
-            content: `Test Results: ${result.passedTests}/${result.totalTests} passed`,
-            timestamp: new Date()
-          }
-        ]
       };
     }
   } catch (error) {
@@ -157,39 +158,36 @@ export async function runCodeNode(state: AgentStateType): Promise<Partial<AgentS
       ...state,
       executionResult: { passed: false, error: 'Execution error' },
       nextAction: 'PROVIDE_FEEDBACK',
-      conversationHistory: [
-        ...state.conversationHistory,
-        {
-          role: 'system',
-          content: 'There was an error executing your code. Please check for syntax errors.',
-          timestamp: new Date()
-        }
-      ]
     };
   }
 }
 
 export async function provideFeedbackNode(state: AgentStateType): Promise<Partial<AgentStateType>> {
   const failedTests = state.executionResult?.results?.filter((r: any) => !r.passed) || [];
-  
-  let feedback = `Your solution didn't pass all tests. Here's what happened:\n\n`;
-  
-  if (failedTests.length > 0) {
-    const firstFailed = failedTests[0];
-    feedback += `❌ Failed Test Case:\n`;
-    feedback += `Input: ${JSON.stringify(firstFailed.input)}\n`;
-    feedback += `Expected: ${JSON.stringify(firstFailed.expectedOutput)}\n`;
-    feedback += `Got: ${JSON.stringify(firstFailed.actualOutput)}\n`;
-    
-    if (firstFailed.error) {
-      feedback += `Error: ${firstFailed.error}\n`;
-    }
-  }
+  const firstFailed = failedTests[0] || null;
+  const executionError = state.executionResult?.error || null;
 
-  feedback += `\nAttempt ${state.attemptCount} of unlimited attempts. `;
-  feedback += state.attemptCount < 3 
-    ? `You need at least 3 attempts before requesting the solution.`
-    : `You can request a hint or keep trying!`;
+  // CodeSignal-style: AI reads the user's actual code and gives specific, positive feedback
+  let feedback: string;
+  try {
+    feedback = await claudeService.generateContextualFeedback(
+      state.currentProblem?.title || 'this problem',
+      state.currentProblem?.description || '',
+      state.userCode || '',
+      state.attemptCount,
+      firstFailed ? {
+        input: firstFailed.input,
+        expectedOutput: firstFailed.expectedOutput,
+        actualOutput: firstFailed.actualOutput
+      } : null,
+      executionError
+    );
+  } catch {
+    // Fallback to basic feedback if Claude fails
+    const passed = state.executionResult?.passedTests ?? 0;
+    const total = state.executionResult?.totalTests ?? 0;
+    feedback = `Good effort! ${passed}/${total} test cases passed. Review the failing case and think about edge conditions.`;
+  }
 
   return {
     ...state,
@@ -207,7 +205,7 @@ export async function provideFeedbackNode(state: AgentStateType): Promise<Partia
 
 export async function generateHintNode(state: AgentStateType): Promise<Partial<AgentStateType>> {
   try {
-    // Check if user has made enough attempts
+    // CodeSignal-style: hints are available after first attempt, no arbitrary gates
     if (state.attemptCount < 1) {
       return {
         ...state,
@@ -215,7 +213,7 @@ export async function generateHintNode(state: AgentStateType): Promise<Partial<A
           ...state.conversationHistory,
           {
             role: 'assistant',
-            content: 'Please try solving the problem first before requesting a hint!',
+            content: 'Make your first attempt — even a rough start gives me something to work with when coaching you!',
             timestamp: new Date()
           }
         ],
@@ -224,26 +222,11 @@ export async function generateHintNode(state: AgentStateType): Promise<Partial<A
     }
 
     const previousHints = state.conversationHistory
-      .filter(msg => msg.role === 'assistant' && msg.content.includes('Hint'))
+      .filter(msg => msg.role === 'assistant' && msg.content.startsWith('[HINT'))
       .map(msg => msg.content);
 
-    const newHintLevel = Math.min(state.hintLevel + 1, 3);
-
-    // If trying to get solution before 3 attempts
-    if (newHintLevel === 3 && state.attemptCount < 3) {
-      return {
-        ...state,
-        conversationHistory: [
-          ...state.conversationHistory,
-          {
-            role: 'assistant',
-            content: `You need at least ${3 - state.attemptCount} more attempt(s) before I can provide the complete solution. Try again! 💪`,
-            timestamp: new Date()
-          }
-        ],
-        nextAction: 'WAIT_FOR_ATTEMPT'
-      };
-    }
+    // Progress through hint levels: 1 (Socratic) → 2 (Pseudocode) → 3 (Approach)
+    const newHintLevel = Math.min((state.hintLevel || 0) + 1, 3);
 
     const hint = await generateHintTool.invoke({
       problemId: state.currentProblem.id,
@@ -253,7 +236,13 @@ export async function generateHintNode(state: AgentStateType): Promise<Partial<A
       previousHints
     });
 
-    const hintPrefix = newHintLevel === 3 ? '📝 Solution Approach' : `💡 Hint ${newHintLevel}`;
+    // Hint type labels — shown in UI for distinct visual styling
+    const hintMeta = {
+      1: { prefix: '[HINT:socratic]', label: 'Think About It' },
+      2: { prefix: '[HINT:pseudocode]', label: 'Pseudocode Guide' },
+      3: { prefix: '[HINT:approach]', label: 'Solution Approach' },
+    };
+    const meta = hintMeta[newHintLevel as keyof typeof hintMeta];
 
     return {
       ...state,
@@ -263,7 +252,7 @@ export async function generateHintNode(state: AgentStateType): Promise<Partial<A
         ...state.conversationHistory,
         {
           role: 'assistant',
-          content: `${hintPrefix}:\n\n${hint}`,
+          content: `${meta.prefix} ${meta.label}:\n\n${hint}`,
           timestamp: new Date()
         }
       ]
@@ -274,6 +263,16 @@ export async function generateHintNode(state: AgentStateType): Promise<Partial<A
   }
 }
 
+function calculateMasteryLevel(
+  problemsSolvedInPattern: number,
+  avgHintsPerProblem: number
+): 'developing' | 'proficient' | 'advanced' | 'expert' {
+  if (problemsSolvedInPattern >= 8 && avgHintsPerProblem <= 0.5) return 'expert';
+  if (problemsSolvedInPattern >= 5 && avgHintsPerProblem <= 1.0) return 'advanced';
+  if (problemsSolvedInPattern >= 2 && avgHintsPerProblem <= 2.0) return 'proficient';
+  return 'developing';
+}
+
 export async function analyzeSolutionNode(state: AgentStateType): Promise<Partial<AgentStateType>> {
   try {
     const analysis = await analyzeSolutionTool.invoke({
@@ -281,7 +280,6 @@ export async function analyzeSolutionNode(state: AgentStateType): Promise<Partia
       problemId: state.currentProblem.id
     });
 
-    // Update progress
     await updateProgressTool.invoke({
       userId: state.userId,
       problemId: state.currentProblem.id,
@@ -290,14 +288,33 @@ export async function analyzeSolutionNode(state: AgentStateType): Promise<Partia
       difficulty: state.currentProblem.difficulty
     });
 
+    // Calculate mastery level from current progress
+    const progress = await Progress.findOne({ userId: state.userId });
+    const patternHistory = (progress?.attemptHistory || []).filter(
+      (a: any) => a.patternId === state.currentPattern && a.solved
+    );
+    const solved = patternHistory.length + 1; // +1 for current
+    const totalHints = patternHistory.reduce((sum: number, a: any) => sum + (a.hintsUsed || 0), 0) + state.hintLevel;
+    const avgHints = solved > 0 ? totalHints / solved : 0;
+    const masteryLevel = calculateMasteryLevel(solved, avgHints);
+
+    // Mastery-aware celebration message
+    const masteryMessages: Record<string, string> = {
+      developing: 'You\'re building momentum — keep going!',
+      proficient: 'You\'re getting the hang of this pattern.',
+      advanced: 'Strong pattern recognition — you\'re ahead of the curve.',
+      expert: 'Expert-level mastery. This pattern is locked in.',
+    };
+
     return {
       ...state,
+      masteryLevel,
       nextAction: 'SELECT_PROBLEM',
       conversationHistory: [
         ...state.conversationHistory,
         {
           role: 'assistant',
-          content: `🎉 **Correct Solution!**\n\n${analysis}\n\nReady for the next challenge?`,
+          content: `✅ Solved!\n\n${analysis}\n\n${masteryMessages[masteryLevel]}`,
           timestamp: new Date()
         }
       ]

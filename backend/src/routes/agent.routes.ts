@@ -47,6 +47,8 @@ router.post('/start-session', async (req: AuthRequest, res) => {
       conversationHistory: [],
       userProgress: progress,
       patternExplanationGiven: false,
+      masteryLevel: 'developing',
+      codeHistory: [],
     };
 
     await sessionService.set(sessionId, userId, initialState);
@@ -96,6 +98,8 @@ router.post('/submit-code', async (req: AuthRequest, res) => {
       messages: result.conversationHistory.slice(-2),
       nextAction: result.nextAction,
       attemptCount: result.attemptCount,
+      masteryLevel: result.masteryLevel,
+      codeHistory: result.codeHistory,
     });
   } catch (error) {
     console.error('Error submitting code:', error);
